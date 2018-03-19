@@ -150,8 +150,8 @@ func (cs *controllerServer) ValidateVolumeCapabilities(ctx context.Context, req 
 
 func getStorageAccount(secrets map[string]string) (string, string, error) {
 	if secrets == nil {
-		return "", "", fmt.Errorf("unexpected: CreateVolume ControllerCreateSecrets is nil")
-	}	
+		return "", "", fmt.Errorf("unexpected: getStorageAccount ControllerCreateSecrets is nil")
+	}
 
 	storageAccountName, ok := secrets["accountname"]
 	if !ok {
@@ -167,7 +167,7 @@ func getStorageAccount(secrets map[string]string) (string, string, error) {
 
 func getContainerBlob(parameters map[string]string) (string, string, error) {
 	if parameters == nil {
-		return "", "", fmt.Errorf("unexpected: CreateVolume Parameters is nil")
+		return "", "", fmt.Errorf("unexpected: getContainerBlob Parameters is nil")
 	}
 
 	container, ok := parameters["container"]

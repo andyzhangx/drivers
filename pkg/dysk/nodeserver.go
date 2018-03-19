@@ -82,7 +82,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	glog.V(4).Infof("target %v\nfstype %v\ndevice %v\nreadonly %v\nattributes %v\n mountflags %v\n",
 		targetPath, fsType, deviceID, readOnly, volumeID, attrib, mountFlags)
 
-	options := []string{"bind"}
+	options := []string{""}
 	if readOnly {
 		options = append(options, "ro")
 	}
@@ -118,13 +118,24 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, fmt.Errorf("mount page blob failed, error: %v", err)
 	}
 
-	// format disk and bind mount next
+	mountInterface := mount.New("" /* default mount path */)
+	mounter := mount.SafeFormatAndMount{
+		Interface: mountInterface,
+		Exec:      mount.NewOsExec(),
+	}
 
+	err = os.MkdirAll(targetPath, os.FileMode(0755))
+	if err != nil {
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("mkdir %s failed, error: %v", targetPath, err)
+		}
+	}
+
+	mounter.FormatAndMount("/dev/" + device, targetPath, fsType, options)
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
 func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-	// Check arguments
 	if len(req.GetVolumeId()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
 	}
