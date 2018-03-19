@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"time"
 
 	"github.com/golang/glog"
 	"golang.org/x/net/context"
@@ -198,6 +199,7 @@ func (ns *nodeServer) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 }
 
 func getRandomDyskName() string {
+	rand.Seed(time.Now().UTC().UnixNano())
 	var of = []rune("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 	out := make([]rune, 8)
 	for i := range out {
