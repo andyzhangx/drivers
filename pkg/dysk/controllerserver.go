@@ -33,16 +33,15 @@ import (
 )
 
 const (
-	autoLeaseFlag      = true
-	vhdFlag            = true
-	breakLeaseFlag     = true
-	readOnlyFlag       = false
+	autoLeaseFlag  = true
+	vhdFlag        = true
+	breakLeaseFlag = true
 )
 
 var (
-	blob = ""
+	blob      = ""
 	container = ""
-	device = ""
+	device    = ""
 )
 
 type controllerServer struct {
@@ -121,7 +120,6 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		return nil, err
 	}
 
-	// use configMap to get leaseID here?
 	dyskClient := client.CreateClient(storageAccountName, storageAccountKey)
 	if err := dyskClient.DeletePageBlob(container, blob, "", breakLeaseFlag); nil != err {
 		return nil, err

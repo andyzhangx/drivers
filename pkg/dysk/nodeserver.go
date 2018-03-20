@@ -99,40 +99,36 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	glog.V(4).Infof("begin to mount page blob(%s) in container(%s), account:%s", blob, container, storageAccountName)
 
 	d := client.Dysk{}
-	d.Type = client.ReadWrite
-	if readOnlyFlag {
+	if readOnly {
 		d.Type = client.ReadOnly
+	} else {
+		d.Type = client.ReadWrite
 	}
+
 	d.AccountName = storageAccountName
 	d.AccountKey = storageAccountKey
 	device = getRandomDyskName()
 	d.Name = device
-	//hardcoded here, need to get SizeGB somewhere
-	d.SizeGB = 2
 	d.Path = "/" + container + "/" + blob
-	// need to get LeaseId somewhere
-	d.LeaseId = ""
 	d.Vhd = vhdFlag
 
-	err = dyskClient.Mount(&d, autoLeaseFlag, breakLeaseFlag)
-	if err != nil {
+	if err = dyskClient.Mount(&d, autoLeaseFlag, breakLeaseFlag); err != nil {
 		return nil, fmt.Errorf("mount page blob failed, error: %v", err)
 	}
 
-	mountInterface := mount.New("" /* default mount path */)
 	mounter := mount.SafeFormatAndMount{
-		Interface: mountInterface,
+		Interface: mount.New(""),
 		Exec:      mount.NewOsExec(),
 	}
 
 	err = os.MkdirAll(targetPath, os.FileMode(0755))
-	if err != nil {
-		if !os.IsExist(err) {
-			return nil, fmt.Errorf("mkdir %s failed, error: %v", targetPath, err)
-		}
+	if err != nil && !os.IsExist(err) {
+		return nil, fmt.Errorf("mkdir %s failed, error: %v", targetPath, err)
 	}
 
-	mounter.FormatAndMount("/dev/" + device, targetPath, fsType, options)
+	if err = mounter.FormatAndMount("/dev/"+device, targetPath, fsType, options); err != nil {
+		return nil, err
+	}
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
@@ -146,7 +142,8 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	targetPath := req.GetTargetPath()
 	volumeID := req.GetVolumeId()
 
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+	mountInterface := mount.New("")
+	notMnt, err := mountInterface.IsLikelyNotMountPoint(targetPath)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -154,22 +151,21 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return nil, status.Error(codes.NotFound, "Volume not mounted")
 	}
 
+	// TODO: find device according to targetPath
+	if err = mountInterface.Unmount(targetPath); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	glog.V(4).Infof("dysk: volume %s/%s has been unmounted.", targetPath, volumeID)
+
 	dyskClient := client.CreateClient("", "")
 	if err = dyskClient.Unmount(device, breakLeaseFlag); err != nil {
 		return nil, err
 	}
 
-	// clean TargetPath next
-	/*
-		// Unmounting the image
-		err = mount.New("").Unmount(req.GetTargetPath())
-		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-	*/
-	glog.V(4).Infof("dysk: volume %s/%s has been unmounted.", targetPath, volumeID)
-
-	return &csi.NodeUnpublishVolumeResponse{}, nil
+	if notMnt {
+		err = os.Remove(targetPath)
+	}
+	return &csi.NodeUnpublishVolumeResponse{}, err
 }
 
 func (ns *nodeServer) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
