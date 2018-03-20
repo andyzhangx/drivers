@@ -41,7 +41,6 @@ const (
 var (
 	blob      = ""
 	container = ""
-	device    = ""
 )
 
 type controllerServer struct {
@@ -87,8 +86,7 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 	glog.V(4).Infof("create page blob successfully, leaseID:%q", leaseID)
 
-	volumeID := uuid.NewUUID().String()
-
+	volumeID := storageAccountName + "/" + container + "/" + blob
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			Id: volumeID,

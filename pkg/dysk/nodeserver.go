@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/golang/glog"
@@ -83,11 +85,6 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	glog.V(4).Infof("target %v\nfstype %v\ndevice %v\nreadonly %v\nattributes %v\n mountflags %v\n",
 		targetPath, fsType, deviceID, readOnly, volumeID, attrib, mountFlags)
 
-	options := []string{""}
-	if readOnly {
-		options = append(options, "ro")
-	}
-
 	secrets := req.GetNodePublishSecrets()
 	storageAccountName, storageAccountKey, err := getStorageAccount(secrets)
 	if err != nil {
@@ -98,16 +95,18 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	glog.V(4).Infof("begin to mount page blob(%s) in container(%s), account:%s", blob, container, storageAccountName)
 
+	options := []string{""}
 	d := client.Dysk{}
 	if readOnly {
 		d.Type = client.ReadOnly
+		options = append(options, "ro")
 	} else {
 		d.Type = client.ReadWrite
 	}
 
 	d.AccountName = storageAccountName
 	d.AccountKey = storageAccountKey
-	device = getRandomDyskName()
+	device := getRandomDyskName()
 	d.Name = device
 	d.Path = "/" + container + "/" + blob
 	d.Vhd = vhdFlag
@@ -126,7 +125,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, fmt.Errorf("mkdir %s failed, error: %v", targetPath, err)
 	}
 
-	if err = mounter.FormatAndMount("/dev/"+device, targetPath, fsType, options); err != nil {
+	if err = mounter.FormatAndMount("/dev/" + device, targetPath, fsType, options); err != nil {
 		return nil, err
 	}
 	return &csi.NodePublishVolumeResponse{}, nil
@@ -151,14 +150,18 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return nil, status.Error(codes.NotFound, "Volume not mounted")
 	}
 
-	// TODO: find device according to targetPath
+	devName, err := getDevName(targetPath)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
 	if err = mountInterface.Unmount(targetPath); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	glog.V(4).Infof("dysk: volume %s/%s has been unmounted.", targetPath, volumeID)
 
 	dyskClient := client.CreateClient("", "")
-	if err = dyskClient.Unmount(device, breakLeaseFlag); err != nil {
+	if err = dyskClient.Unmount(devName, breakLeaseFlag); err != nil {
 		return nil, err
 	}
 
@@ -202,4 +205,19 @@ func getRandomDyskName() string {
 		out[i] = of[rand.Intn(len(of))]
 	}
 	return "dysk" + string(out)
+}
+
+func getDevName(targetPath string) (string, error) {
+	args := []string{"-o", "SOURCE", "--noheadings", "--first-only", "--target", targetPath}
+	output, err := exec.Command("findmnt", args...).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	out := strings.TrimSuffix(string(output), "\n")
+	fmt.Println(out)
+	i := strings.LastIndex(out, "/")
+	if i == -1 {
+		return "", fmt.Errorf("error parsing findmnt output, expected at least one slash: %q", out)
+	}
+	return out[i+1:], nil
 }
