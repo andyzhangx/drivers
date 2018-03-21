@@ -18,6 +18,7 @@ package dysk
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/glog"
@@ -36,11 +37,6 @@ const (
 	autoLeaseFlag  = true
 	vhdFlag        = true
 	breakLeaseFlag = true
-)
-
-var (
-	blob      = ""
-	container = ""
 )
 
 type controllerServer struct {
@@ -68,13 +64,10 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 
 	parameters := req.GetParameters()
-	containerName, blobName, err := getContainerBlob(parameters)
+	container, blob, err := getContainerBlobByParameters(parameters)
 	if err != nil {
 		return nil, err
 	}
-
-	container = containerName
-	blob = blobName
 
 	dyskClient := client.CreateClient(storageAccountName, storageAccountKey)
 	glog.V(4).Infof("begin to create page blob(%s) in container(%s), account:%s, size:%dGB", blob, container, storageAccountName, volSizeGB)
@@ -100,8 +93,8 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 }
 
 func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
-	// Check arguments
-	if len(req.GetVolumeId()) == 0 {
+	volumeID := req.GetVolumeId()
+	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
 	}
 
@@ -109,11 +102,15 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		glog.V(3).Infof("invalid delete volume req: %v", req)
 		return nil, err
 	}
-	volumeID := req.VolumeId
 	glog.V(4).Infof("deleting volume %s", volumeID)
 
 	secrets := req.GetControllerDeleteSecrets()
 	storageAccountName, storageAccountKey, err := getStorageAccount(secrets)
+	if err != nil {
+		return nil, err
+	}
+
+	container, blob, err := getContainerBlobByVolumeID(volumeID)
 	if err != nil {
 		return nil, err
 	}
@@ -161,9 +158,9 @@ func getStorageAccount(secrets map[string]string) (string, string, error) {
 	return storageAccountName, storageAccountKey, nil
 }
 
-func getContainerBlob(parameters map[string]string) (string, string, error) {
+func getContainerBlobByParameters(parameters map[string]string) (string, string, error) {
 	if parameters == nil {
-		return "", "", fmt.Errorf("unexpected: getContainerBlob Parameters is nil")
+		return "", "", fmt.Errorf("unexpected: getContainerBlobByParameters Parameters is nil")
 	}
 
 	container, ok := parameters["container"]
@@ -176,4 +173,12 @@ func getContainerBlob(parameters map[string]string) (string, string, error) {
 	}
 
 	return container, blob, nil
+}
+
+func getContainerBlobByVolumeID(id string) (string, string, error) {
+	segments := strings.Split(id, "/")
+	if len(segments) != 3 {
+		return "", "", fmt.Errorf("error parsing id, expected two slashes: %q", id)
+	}
+	return segments[1], segments[2], nil
 }

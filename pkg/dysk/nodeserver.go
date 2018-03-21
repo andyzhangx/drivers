@@ -91,6 +91,12 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return nil, err
 	}
 
+	container, blob, err := getContainerBlobByVolumeID(volumeID)
+	if err != nil {
+		return nil, err
+	}
+	vhdPath := "/" + container + "/" + blob
+
 	dyskClient := client.CreateClient(storageAccountName, storageAccountKey)
 
 	glog.V(4).Infof("begin to mount page blob(%s) in container(%s), account:%s", blob, container, storageAccountName)
@@ -108,7 +114,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	d.AccountKey = storageAccountKey
 	device := getRandomDyskName()
 	d.Name = device
-	d.Path = "/" + container + "/" + blob
+	d.Path = vhdPath
 	d.Vhd = vhdFlag
 
 	if err = dyskClient.Mount(&d, autoLeaseFlag, breakLeaseFlag); err != nil {
@@ -158,7 +164,7 @@ func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	if err = mountInterface.Unmount(targetPath); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	glog.V(4).Infof("dysk: volume %s/%s has been unmounted.", targetPath, volumeID)
+	glog.V(4).Infof("dysk: volume(%s) targetPath(%s) has been unmounted.", targetPath, volumeID)
 
 	dyskClient := client.CreateClient("", "")
 	if err = dyskClient.Unmount(devName, breakLeaseFlag); err != nil {
@@ -214,7 +220,6 @@ func getDevName(targetPath string) (string, error) {
 		return "", err
 	}
 	out := strings.TrimSuffix(string(output), "\n")
-	fmt.Println(out)
 	i := strings.LastIndex(out, "/")
 	if i == -1 {
 		return "", fmt.Errorf("error parsing findmnt output, expected at least one slash: %q", out)
