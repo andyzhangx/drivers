@@ -123,24 +123,6 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
-func (cs *controllerServer) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
-
-	// Check arguments
-	if len(req.GetVolumeId()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
-	}
-	if req.GetVolumeCapabilities() == nil {
-		return nil, status.Error(codes.InvalidArgument, "Volume capabilities missing in request")
-	}
-
-	for _, cap := range req.VolumeCapabilities {
-		if cap.GetAccessMode().GetMode() != csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER {
-			return &csi.ValidateVolumeCapabilitiesResponse{Supported: false, Message: ""}, nil
-		}
-	}
-	return &csi.ValidateVolumeCapabilitiesResponse{Supported: true, Message: ""}, nil
-}
-
 func getStorageAccount(secrets map[string]string) (string, string, error) {
 	if secrets == nil {
 		return "", "", fmt.Errorf("unexpected: getStorageAccount ControllerCreateSecrets is nil")

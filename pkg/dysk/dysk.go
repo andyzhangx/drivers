@@ -35,8 +35,8 @@ type DyskDriver struct {
 }
 
 var (
-	dyskDriver *DyskDriver
-	vendorVersion  = "0.2.0"
+	dyskDriver    *DyskDriver
+	vendorVersion = "0.2.0"
 )
 
 func GetDyskDriver() *DyskDriver {
@@ -70,7 +70,9 @@ func (d *DyskDriver) Run(driverName, nodeID, endpoint string) {
 		glog.Fatalln("Failed to initialize CSI Driver.")
 	}
 	d.driver.AddControllerServiceCapabilities([]csi.ControllerServiceCapability_RPC_Type{csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME})
-	d.driver.AddVolumeCapabilityAccessModes([]csi.VolumeCapability_AccessMode_Mode{csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER})
+	d.driver.AddVolumeCapabilityAccessModes([]csi.VolumeCapability_AccessMode_Mode{csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+		csi.VolumeCapability_AccessMode_MULTI_NODE_READER_ONLY,
+		csi.VolumeCapability_AccessMode_MULTI_NODE_SINGLE_WRITER})
 
 	// Create GRPC servers
 	d.ids = NewIdentityServer(d.driver)
