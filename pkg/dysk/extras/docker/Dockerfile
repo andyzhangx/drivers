@@ -1,6 +1,6 @@
 FROM alpine
-LABEL maintainers="Kubernetes Authors"
-LABEL description="HostPath CSI Plugin"
+LABEL maintainers="andyzhangx"
+LABEL description="dysk CSI Plugin"
 
-COPY hostpathplugin /hostpathplugin
-ENTRYPOINT ["/hostpathplugin"]
+COPY dyskplugin /dyskplugin
+ENTRYPOINT ["/dyskplugin"]

@@ -1,6 +1,6 @@
 #!/bin/sh
 
-PROG=hostpathplugin
+PROG=dyskplugin
 
 docker build --rm -f Dockerfile.builder -t ${PROG}:builder .
 docker run --rm --privileged -v $PWD:/host ${PROG}:builder cp /${PROG} /host/${PROG}
