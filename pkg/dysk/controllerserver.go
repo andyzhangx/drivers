@@ -30,13 +30,14 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	//"k8s.io/kubernetes/pkg/volume/util"
 )
 
 const (
-	autoLeaseFlag  = true
-	vhdFlag        = true
-	breakLeaseFlag = true
+	autoLeaseFlag        = true
+	vhdFlag              = true
+	breakLeaseFlag       = true
+	defaultContainerName = "dysks"
+	defaultVolumeSize    = 1
 )
 
 type controllerServer struct {
@@ -44,14 +45,12 @@ type controllerServer struct {
 }
 
 func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
-	// Volume Name
 	volName := req.GetName()
 	if len(volName) == 0 {
 		volName = uuid.NewUUID().String()
 	}
 
-	// Volume Size - Default is 1 GiB
-	volSizeBytes := int64(1 * 1024 * 1024 * 1024)
+	volSizeBytes := int64(defaultVolumeSize * 1024 * 1024 * 1024)
 	if req.GetCapacityRange() != nil {
 		volSizeBytes = int64(req.GetCapacityRange().GetRequiredBytes())
 	}
@@ -64,10 +63,7 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 
 	parameters := req.GetParameters()
-	container, blob, err := getContainerBlobByParameters(parameters)
-	if err != nil {
-		return nil, err
-	}
+	container, blob := getContainerBlobByParameters(parameters)
 
 	dyskClient := client.CreateClient(storageAccountName, storageAccountKey)
 	glog.V(4).Infof("begin to create page blob(%s) in container(%s), account:%s, size:%dGB", blob, container, storageAccountName, volSizeGB)
@@ -140,21 +136,17 @@ func getStorageAccount(secrets map[string]string) (string, string, error) {
 	return storageAccountName, storageAccountKey, nil
 }
 
-func getContainerBlobByParameters(parameters map[string]string) (string, string, error) {
-	if parameters == nil {
-		return "", "", fmt.Errorf("unexpected: getContainerBlobByParameters Parameters is nil")
-	}
-
+func getContainerBlobByParameters(parameters map[string]string) (string, string) {
 	container, ok := parameters["container"]
 	if !ok {
-		return "", "", fmt.Errorf("could not find container field in CreateVolume Parameters")
+		container = defaultContainerName
 	}
 	blob, ok := parameters["blob"]
 	if !ok {
-		return "", "", fmt.Errorf("could not find blob field in CreateVolume Parameters")
+		blob = getRandomDyskName() + ".vhd"
 	}
 
-	return container, blob, nil
+	return container, blob
 }
 
 func getContainerBlobByVolumeID(id string) (string, string, error) {
