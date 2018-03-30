@@ -2,5 +2,5 @@ FROM alpine
 LABEL maintainers="andyzhangx"
 LABEL description="dysk CSI Plugin"
 
-COPY dyskplugin /dyskplugin
+COPY _output/dyskplugin /dyskplugin
 ENTRYPOINT ["/dyskplugin"]
