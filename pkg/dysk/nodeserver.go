@@ -88,12 +88,12 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	secrets := req.GetNodePublishSecrets()
 	storageAccountName, storageAccountKey, err := getStorageAccount(secrets)
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	container, blob, err := getContainerBlobByVolumeID(volumeID)
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	vhdPath := "/" + container + "/" + blob
 
@@ -101,7 +101,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	glog.V(4).Infof("begin to mount page blob(%s) in container(%s), account:%s", blob, container, storageAccountName)
 
-	options := []string{""}
+	options := []string{}
 	d := client.Dysk{}
 	if readOnly {
 		d.Type = client.ReadOnly
@@ -118,7 +118,13 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	d.Vhd = vhdFlag
 
 	if err = dyskClient.Mount(&d, autoLeaseFlag, breakLeaseFlag); err != nil {
-		return nil, fmt.Errorf("mount page blob failed, error: %v", err)
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	glog.V(5).Infof("mount page blob complete")
+
+	err = os.MkdirAll(targetPath, os.FileMode(0755))
+	if err != nil && !os.IsExist(err) {
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	mounter := mount.SafeFormatAndMount{
@@ -126,14 +132,12 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		Exec:      mount.NewOsExec(),
 	}
 
-	err = os.MkdirAll(targetPath, os.FileMode(0755))
-	if err != nil && !os.IsExist(err) {
-		return nil, fmt.Errorf("mkdir %s failed, error: %v", targetPath, err)
-	}
-
+	glog.V(4).Infof("begin to format device(%s), targetPath(%s), fsType(%s), options(%q)", "/dev/"+device, targetPath, fsType, options)
 	if err = mounter.FormatAndMount("/dev/" + device, targetPath, fsType, options); err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
+	glog.V(5).Infof("format device complete")
+
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
