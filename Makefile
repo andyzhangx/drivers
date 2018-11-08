@@ -34,6 +34,9 @@ nfs:
 hostpath:
 	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
 	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-X github.com/kubernetes-csi/drivers/pkg/hostpath.vendorVersion=$(REV) -extldflags "-static"' -o _output/hostpathplugin ./app/hostpathplugin
+azurefile:
+	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
+	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-X github.com/kubernetes-csi/drivers/pkg/azurefile.vendorVersion=$(REV) -extldflags "-static"' -o _output/azurefileplugin ./app/azurefileplugin
 hostpath-container: hostpath
 	docker build -t $(IMAGE_TAG) -f ./app/hostpathplugin/Dockerfile .
 push: hostpath-container
