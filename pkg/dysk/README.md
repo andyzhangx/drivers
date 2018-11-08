@@ -10,7 +10,7 @@ $ make dysk
 ### Prerequisite
 set azure storage account name and key
 ```
-export X_CSI_SECRETS="accountname=xiazhang,accountkey=RJwctkX+HLU8yIh+LpOMubegRFDYKdvSv4sMbM/SOk8wugDVQ+DUEVxtpBskvgCDWUo3VvRemoved=="
+export X_CSI_SECRETS="accountname=xiazhang,accountkey=..."
 ```
 
 ### Start dysk driver
