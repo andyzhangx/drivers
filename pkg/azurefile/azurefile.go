@@ -67,7 +67,7 @@ var azureFileVolumeSnapshots map[string]azureFileSnapshot
 
 var (
 	azureFileDriver *azureFile
-	vendorVersion  = "dev"
+	vendorVersion   = "dev"
 )
 
 func init() {
@@ -97,30 +97,32 @@ func NewNodeServer(d *csicommon.CSIDriver) *nodeServer {
 	}
 }
 
-func (hp *azureFile) Run(driverName, nodeID, endpoint string) {
+func (f *azureFile) Run(driverName, nodeID, endpoint string) {
 	glog.Infof("Driver: %v ", driverName)
 	glog.Infof("Version: %s", vendorVersion)
 
+	GetCloudProvider()
+
 	// Initialize default library driver
-	hp.driver = csicommon.NewCSIDriver(driverName, vendorVersion, nodeID)
-	if hp.driver == nil {
-		glog.Fatalln("Failed to initialize CSI Driver.")
+	f.driver = csicommon.NewCSIDriver(driverName, vendorVersion, nodeID)
+	if f.driver == nil {
+		glog.Fatalln("Failed to initialize azurefile CSI Driver.")
 	}
-	hp.driver.AddControllerServiceCapabilities(
+	f.driver.AddControllerServiceCapabilities(
 		[]csi.ControllerServiceCapability_RPC_Type{
 			csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
 			csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
 			csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
 		})
-	hp.driver.AddVolumeCapabilityAccessModes([]csi.VolumeCapability_AccessMode_Mode{csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER})
+	f.driver.AddVolumeCapabilityAccessModes([]csi.VolumeCapability_AccessMode_Mode{csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER})
 
 	// Create GRPC servers
-	hp.ids = NewIdentityServer(hp.driver)
-	hp.ns = NewNodeServer(hp.driver)
-	hp.cs = NewControllerServer(hp.driver)
+	f.ids = NewIdentityServer(f.driver)
+	f.ns = NewNodeServer(f.driver)
+	f.cs = NewControllerServer(f.driver)
 
 	s := csicommon.NewNonBlockingGRPCServer()
-	s.Start(endpoint, hp.ids, hp.cs, hp.ns)
+	s.Start(endpoint, f.ids, f.cs, f.ns)
 	s.Wait()
 }
 

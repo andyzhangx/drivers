@@ -83,6 +83,7 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if capacity >= maxStorageCapacity {
 		return nil, status.Errorf(codes.OutOfRange, "Requested capacity %d exceeds maximum allowed %d", capacity, maxStorageCapacity)
 	}
+
 	volumeID := uuid.NewUUID().String()
 	path := provisionRoot + volumeID
 	err := os.MkdirAll(path, 0777)
@@ -110,7 +111,7 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 			}
 		}
 	}
-	glog.V(4).Infof("create volume %s", path)
+	glog.V(2).Infof("create volume %s", path)
 	azureFileVol := azureFileVolume{}
 	azureFileVol.VolName = req.GetName()
 	azureFileVol.VolID = volumeID
