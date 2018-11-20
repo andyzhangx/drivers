@@ -20,11 +20,13 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
+	"github.com/ghodss/yaml"
 	"github.com/golang/glog"
 	"golang.org/x/crypto/pkcs12"
 )
@@ -135,13 +137,50 @@ func decodePkcs12(pkcs []byte, password string) (*x509.Certificate, *rsa.Private
 	return certificate, rsaPrivateKey, nil
 }
 
-func GetCloudProvider() error {
-	if cred, ok := os.LookupEnv("AZURE_CREDENTIAL"); ok {
-		glog.V(2).Infof("AZURE_CREDENTIAL env var set as %v", cred)
-		fmt.Printf"AZURE_CREDENTIAL env var set as %v\n", cred)
-	} else {
-		fmt.Println("AZURE_CREDENTIAL env var not set")
-		return fmt.Errorf("AZURE_CREDENTIAL env var not set")
+// ParseConfig returns a parsed configuration for an Azure cloudprovider config file
+func parseConfig(configReader io.Reader) (*AzureAuthConfig, error) {
+	var config AzureAuthConfig
+
+	if configReader == nil {
+		return &config, nil
 	}
+
+	configContents, err := ioutil.ReadAll(configReader)
+	if err != nil {
+		return nil, err
+	}
+	err = yaml.Unmarshal(configContents, &config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+func GetCloudProvider() error {
+	var credFile string
+	if credFile, ok := os.LookupEnv("AZURE_CREDENTIAL_FILE"); ok {
+		glog.V(2).Infof("AZURE_CREDENTIAL_FILE env var set as %v", credFile)
+	} else {
+		return fmt.Errorf("AZURE_CREDENTIAL_FILE env var not set")
+	}
+
+	f, err := os.Open(credFile)
+	if err != nil {
+		glog.Errorf("Failed to load config from file: %s", credFile)
+		return fmt.Errorf("Failed to load config from file: %s", credFile)
+	}
+	defer f.Close()
+
+	config, err := parseConfig(f)
+	if err != nil {
+		glog.Errorf("Failed to load azure credential file: %v", err)
+	}
+
+	_, err = ParseAzureEnvironment(config.Cloud)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
