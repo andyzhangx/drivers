@@ -22,17 +22,23 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure"
+	"k8s.io/kubernetes/pkg/volume/util"
+
+	utilexec "k8s.io/utils/exec"
+
+	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2018-07-01/storage"
+	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/glog"
+	"github.com/kubernetes-csi/drivers/pkg/csi-common"
 	"github.com/pborman/uuid"
+
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"github.com/container-storage-interface/spec/lib/go/csi/v0"
-	"github.com/kubernetes-csi/drivers/pkg/csi-common"
-	utilexec "k8s.io/utils/exec"
 )
 
 const (
@@ -44,53 +50,79 @@ const (
 
 type controllerServer struct {
 	*csicommon.DefaultControllerServer
+	cloud *azure.Cloud
 }
 
 func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	if err := cs.Driver.ValidateControllerServiceRequest(csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME); err != nil {
-		glog.V(3).Infof("invalid create volume req: %v", req)
+		glog.Errorf("invalid create volume req: %v", req)
 		return nil, err
 	}
 
-	// Check arguments
-	if len(req.GetName()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Name missing in request")
+	// Validate arguments
+	volumeCapabilities := req.GetVolumeCapabilities()
+	name := req.GetName()
+	if len(name) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "CreateVolume Name must be provided")
 	}
-	if req.GetVolumeCapabilities() == nil {
-		return nil, status.Error(codes.InvalidArgument, "Volume Capabilities missing in request")
+	if volumeCapabilities == nil || len(volumeCapabilities) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "CreateVolume Volume capabilities must be provided")
 	}
-	// Need to check for already existing volume name, and if found
-	// check for the requested capacity and already allocated capacity
-	if exVol, err := getVolumeByName(req.GetName()); err == nil {
-		// Since err is nil, it means the volume with the same name already exists
-		// need to check if the size of exisiting volume is the same as in new
-		// request
-		if exVol.VolSize >= int64(req.GetCapacityRange().GetRequiredBytes()) {
-			// exisiting volume is compatible with new request and should be reused.
-			// TODO (sbezverk) Do I need to make sure that RBD volume still exists?
-			return &csi.CreateVolumeResponse{
-				Volume: &csi.Volume{
-					Id:            exVol.VolID,
-					CapacityBytes: int64(exVol.VolSize),
-					Attributes:    req.GetParameters(),
-				},
-			}, nil
-		}
-		return nil, status.Error(codes.AlreadyExists, fmt.Sprintf("Volume with the same name: %s but with different size already exist", req.GetName()))
-	}
-	// Check for maximum available capacity
-	capacity := int64(req.GetCapacityRange().GetRequiredBytes())
-	if capacity >= maxStorageCapacity {
-		return nil, status.Errorf(codes.OutOfRange, "Requested capacity %d exceeds maximum allowed %d", capacity, maxStorageCapacity)
-	}
+
+	volSizeBytes := int64(req.GetCapacityRange().GetRequiredBytes())
+	requestGiB := int(util.RoundUpSize(volSizeBytes, 1024*1024*1024))
 
 	volumeID := uuid.NewUUID().String()
 	path := provisionRoot + volumeID
-	err := os.MkdirAll(path, 0777)
+
+	parameters := req.GetParameters()
+	var sku, resourceGroup, location, account string
+
+	// File share name has a length limit of 63, and it cannot contain two consecutive '-'s.
+	// todo: get cluster name
+	fileName := util.GenerateVolumeName("k8s", name, 63)
+	name = strings.Replace(name, "--", "-", -1)
+	//secretNamespace := "csiprovisionersecretnamespace"
+	// Apply ProvisionerParameters (case-insensitive). We leave validation of
+	// the values to the cloud provider.
+	for k, v := range parameters {
+		switch strings.ToLower(k) {
+		case "skuname":
+			sku = v
+		case "location":
+			location = v
+		case "storageaccount":
+			account = v
+		//case "secretnamespace":
+		//secretNamespace = v
+		case "resourcegroup":
+			resourceGroup = v
+		default:
+			return nil, fmt.Errorf("invalid option %q", k)
+		}
+	}
+
+	// when use azure file premium, account kind should be specified as FileStorage
+	accountKind := string(storage.StorageV2)
+	if strings.HasPrefix(strings.ToLower(sku), "premium") {
+		accountKind = string(storage.FileStorage)
+	}
+
+	glog.V(2).Infof("begin to create file share(%s) on account(%s) rg(%s) location(%s) size(%d)", fileName, account, resourceGroup, location, requestGiB)
+	_, _, err := cs.cloud.CreateFileShare(fileName, account, accountKind, resourceGroup, location, requestGiB)
 	if err != nil {
-		glog.V(3).Infof("failed to create volume: %v", err)
+		glog.Errorf("failed to create volume: %v", err)
 		return nil, err
 	}
+
+	// create a secret for storage account and key
+	/*
+		secretName, err := a.util.SetAzureCredentials(a.plugin.host, secretNamespace, account, key)
+		if err != nil {
+			return nil, err
+		}
+	*/
+
 	if req.GetVolumeContentSource() != nil {
 		contentSource := req.GetVolumeContentSource()
 		if contentSource.GetSnapshot() != nil {
@@ -111,13 +143,8 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 			}
 		}
 	}
-	glog.V(2).Infof("create volume %s", path)
-	azureFileVol := azureFileVolume{}
-	azureFileVol.VolName = req.GetName()
-	azureFileVol.VolID = volumeID
-	azureFileVol.VolSize = capacity
-	azureFileVol.VolPath = path
-	azureFileVolumes[volumeID] = azureFileVol
+	glog.V(2).Infof("create file share %s on storage account %s successfully", fileName, account)
+
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			Id:            volumeID,

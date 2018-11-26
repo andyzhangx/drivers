@@ -47,7 +47,7 @@ func GetCloudProvider() (*azure.Cloud, error) {
 
 	az, ok := cloud.(*azure.Cloud)
 	if !ok || az == nil {
-		return nil, fmt.Errorf("AzureDisk -  failed to get Azure Cloud Provider. GetCloudProvider returned %v instead", cloud)
+		return nil, fmt.Errorf("failed to get Azure Cloud Provider. GetCloudProvider returned %v instead", cloud)
 	}
 	return az, nil
 }

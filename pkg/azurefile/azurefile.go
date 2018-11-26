@@ -19,9 +19,10 @@ package azurefile
 import (
 	"fmt"
 
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure"
+
 	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/glog"
-
 	"github.com/kubernetes-csi/drivers/pkg/csi-common"
 )
 
@@ -85,9 +86,10 @@ func NewIdentityServer(d *csicommon.CSIDriver) *identityServer {
 	}
 }
 
-func NewControllerServer(d *csicommon.CSIDriver) *controllerServer {
+func NewControllerServer(d *csicommon.CSIDriver, cloud *azure.Cloud) *controllerServer {
 	return &controllerServer{
 		DefaultControllerServer: csicommon.NewDefaultControllerServer(d),
+		cloud: cloud,
 	}
 }
 
@@ -101,7 +103,10 @@ func (f *azureFile) Run(driverName, nodeID, endpoint string) {
 	glog.Infof("Driver: %v ", driverName)
 	glog.Infof("Version: %s", vendorVersion)
 
-	GetCloudProvider()
+	cloud, err := GetCloudProvider()
+	if err != nil {
+		glog.Fatalln("failed to get Azure Cloud Provider")
+	}
 
 	// Initialize default library driver
 	f.driver = csicommon.NewCSIDriver(driverName, vendorVersion, nodeID)
@@ -119,7 +124,7 @@ func (f *azureFile) Run(driverName, nodeID, endpoint string) {
 	// Create GRPC servers
 	f.ids = NewIdentityServer(f.driver)
 	f.ns = NewNodeServer(f.driver)
-	f.cs = NewControllerServer(f.driver)
+	f.cs = NewControllerServer(f.driver, cloud)
 
 	s := csicommon.NewNonBlockingGRPCServer()
 	s.Start(endpoint, f.ids, f.cs, f.ns)
