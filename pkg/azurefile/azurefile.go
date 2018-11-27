@@ -33,6 +33,9 @@ const (
 	gib100 int64 = gib * 100
 	tib    int64 = gib * 1024
 	tib100 int64 = tib * 100
+
+	ACCOUNT_NAME = "accountname"
+	ACCOUNT_KEY  = "accountkey"
 )
 
 type azureFile struct {
@@ -89,7 +92,7 @@ func NewIdentityServer(d *csicommon.CSIDriver) *identityServer {
 func NewControllerServer(d *csicommon.CSIDriver, cloud *azure.Cloud) *controllerServer {
 	return &controllerServer{
 		DefaultControllerServer: csicommon.NewDefaultControllerServer(d),
-		cloud: cloud,
+		cloud:                   cloud,
 	}
 }
 

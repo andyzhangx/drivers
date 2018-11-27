@@ -30,7 +30,7 @@ import (
 
 	utilexec "k8s.io/utils/exec"
 
-	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2018-07-01/storage"
+	//"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2018-07-01/storage"
 	"github.com/container-storage-interface/spec/lib/go/csi/v0"
 	"github.com/golang/glog"
 	"github.com/kubernetes-csi/drivers/pkg/csi-common"
@@ -42,10 +42,9 @@ import (
 )
 
 const (
-	deviceID           = "deviceID"
-	provisionRoot      = "/tmp/"
-	snapshotRoot       = "/tmp/"
-	maxStorageCapacity = tib
+	deviceID      = "deviceID"
+	provisionRoot = "/tmp/"
+	snapshotRoot  = "/tmp/"
 )
 
 type controllerServer struct {
@@ -72,17 +71,13 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	volSizeBytes := int64(req.GetCapacityRange().GetRequiredBytes())
 	requestGiB := int(util.RoundUpSize(volSizeBytes, 1024*1024*1024))
 
-	volumeID := uuid.NewUUID().String()
-	path := provisionRoot + volumeID
-
 	parameters := req.GetParameters()
 	var sku, resourceGroup, location, account string
 
 	// File share name has a length limit of 63, and it cannot contain two consecutive '-'s.
 	// todo: get cluster name
-	fileName := util.GenerateVolumeName("k8s", name, 63)
-	name = strings.Replace(name, "--", "-", -1)
-	//secretNamespace := "csiprovisionersecretnamespace"
+	fileShareName := util.GenerateVolumeName("pvc-file", uuid.NewUUID().String(), 63)
+	fileShareName = strings.Replace(fileShareName, "--", "-", -1)
 	// Apply ProvisionerParameters (case-insensitive). We leave validation of
 	// the values to the cloud provider.
 	for k, v := range parameters {
@@ -93,8 +88,6 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 			location = v
 		case "storageaccount":
 			account = v
-		//case "secretnamespace":
-		//secretNamespace = v
 		case "resourcegroup":
 			resourceGroup = v
 		default:
@@ -103,25 +96,23 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 
 	// when use azure file premium, account kind should be specified as FileStorage
+	/* todo: depends on k8s v1.13.0
 	accountKind := string(storage.StorageV2)
 	if strings.HasPrefix(strings.ToLower(sku), "premium") {
 		accountKind = string(storage.FileStorage)
 	}
+	*/
 
-	glog.V(2).Infof("begin to create file share(%s) on account(%s) rg(%s) location(%s) size(%d)", fileName, account, resourceGroup, location, requestGiB)
-	_, _, err := cs.cloud.CreateFileShare(fileName, account, accountKind, resourceGroup, location, requestGiB)
+	glog.V(2).Infof("begin to create file share(%s) on account(%s) type(%s) rg(%s) location(%s) size(%d)", fileShareName, account, sku, resourceGroup, location, requestGiB)
+	account, key, err := cs.cloud.CreateFileShare(fileShareName, account, sku, resourceGroup, location, requestGiB)
 	if err != nil {
 		glog.Errorf("failed to create volume: %v", err)
 		return nil, err
 	}
+	parameters[ACCOUNT_NAME] = account
+	parameters[ACCOUNT_KEY] = key
 
-	// create a secret for storage account and key
-	/*
-		secretName, err := a.util.SetAzureCredentials(a.plugin.host, secretNamespace, account, key)
-		if err != nil {
-			return nil, err
-		}
-	*/
+	volumeID := account + "-" + fileShareName
 
 	if req.GetVolumeContentSource() != nil {
 		contentSource := req.GetVolumeContentSource()
@@ -135,6 +126,7 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 				return nil, status.Errorf(codes.Internal, "status of snapshot %v is not ready", snapshotId)
 			}
 			snapshotPath := snapshot.Path
+			path := provisionRoot
 			args := []string{"zxvf", snapshotPath, "-C", path}
 			executor := utilexec.New()
 			out, err := executor.Command("tar", args...).CombinedOutput()
@@ -143,19 +135,18 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 			}
 		}
 	}
-	glog.V(2).Infof("create file share %s on storage account %s successfully", fileName, account)
+	glog.V(2).Infof("create file share %s on storage account %s successfully", fileShareName, account)
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			Id:            volumeID,
 			CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
-			Attributes:    req.GetParameters(),
+			Attributes:    parameters,
 		},
 	}, nil
 }
 
 func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
-
 	// Check arguments
 	if len(req.GetVolumeId()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
@@ -166,7 +157,9 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		return nil, err
 	}
 	volumeID := req.VolumeId
-	glog.V(4).Infof("deleting volume %s", volumeID)
+	glog.V(2).Infof("deleting azure file %s", volumeID)
+	//cs.cloud.DeleteFileShare()
+
 	path := provisionRoot + volumeID
 	os.RemoveAll(path)
 	delete(azureFileVolumes, volumeID)
