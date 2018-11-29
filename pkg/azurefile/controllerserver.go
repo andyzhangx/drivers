@@ -417,39 +417,3 @@ func convertSnapshot(snap azureFileSnapshot) *csi.ListSnapshotsResponse {
 
 	return rsp
 }
-
-func getFileShareInfo(id string) (string, string, string, error) {
-	segments := strings.Split(id, SEPERATOR)
-	if len(segments) < 3 {
-		return "", "", "", fmt.Errorf("error parsing volume id: %q", id)
-	}
-	return segments[0], segments[1], segments[2], nil
-}
-
-func getStorageAccesskey(cloud *azure.Cloud, account, resourceGroup string) (string, error) {
-	ctx, cancel := getContextWithCancel()
-	defer cancel()
-
-	result, err := cloud.StorageAccountClient.ListKeys(ctx, resourceGroup, account)
-	if err != nil {
-		return "", err
-	}
-	if result.Keys == nil {
-		return "", fmt.Errorf("empty keys")
-	}
-
-	for _, k := range *result.Keys {
-		if k.Value != nil && *k.Value != "" {
-			v := *k.Value
-			if ind := strings.LastIndex(v, " "); ind >= 0 {
-				v = v[(ind + 1):]
-			}
-			return v, nil
-		}
-	}
-	return "", fmt.Errorf("no valid keys")
-}
-
-func getContextWithCancel() (context.Context, context.CancelFunc) {
-	return context.WithCancel(context.Background())
-}
