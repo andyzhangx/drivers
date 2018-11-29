@@ -36,6 +36,7 @@ const (
 
 	ACCOUNT_NAME = "accountname"
 	ACCOUNT_KEY  = "accountkey"
+	SEPERATOR = "/"
 )
 
 type azureFile struct {

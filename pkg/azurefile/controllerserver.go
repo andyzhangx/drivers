@@ -17,6 +17,7 @@ limitations under the License.
 package azurefile
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -36,7 +37,6 @@ import (
 	"github.com/kubernetes-csi/drivers/pkg/csi-common"
 	"github.com/pborman/uuid"
 
-	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -104,15 +104,15 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	*/
 
 	glog.V(2).Infof("begin to create file share(%s) on account(%s) type(%s) rg(%s) location(%s) size(%d)", fileShareName, account, sku, resourceGroup, location, requestGiB)
-	account, key, err := cs.cloud.CreateFileShare(fileShareName, account, sku, resourceGroup, location, requestGiB)
+	account, _, err := cs.cloud.CreateFileShare(fileShareName, account, sku, resourceGroup, location, requestGiB)
 	if err != nil {
 		glog.Errorf("failed to create volume: %v", err)
 		return nil, err
 	}
 	parameters[ACCOUNT_NAME] = account
-	parameters[ACCOUNT_KEY] = key
+	//parameters[ACCOUNT_KEY] = key
 
-	volumeID := account + "-" + fileShareName
+	volumeID := resourceGroup + SEPERATOR + account + SEPERATOR + fileShareName
 
 	if req.GetVolumeContentSource() != nil {
 		contentSource := req.GetVolumeContentSource()
@@ -158,16 +158,28 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	}
 	volumeID := req.VolumeId
 	glog.V(2).Infof("deleting azure file %s", volumeID)
-	//cs.cloud.DeleteFileShare()
+	resourceGroupName, accountName, fileShareName, err := getFileShareInfo(volumeID)
+	if err != nil {
+		return nil, err
+	}
 
-	path := provisionRoot + volumeID
-	os.RemoveAll(path)
-	delete(azureFileVolumes, volumeID)
+	if resourceGroupName == "" {
+		resourceGroupName = cs.cloud.ResourceGroup
+	}
+
+	accountKey, err := getStorageAccesskey(cs.cloud, accountName, resourceGroupName)
+	if err != nil {
+		return nil, fmt.Errorf("no key for storage account(%s) under resource group(%s), err %v", accountName, resourceGroupName, err)
+	}
+
+	if err := cs.cloud.DeleteFileShare(accountName, accountKey, fileShareName); err != nil {
+		return nil, err
+	}
+
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
 func (cs *controllerServer) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
-
 	// Check arguments
 	if len(req.GetVolumeId()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
@@ -404,4 +416,40 @@ func convertSnapshot(snap azureFileSnapshot) *csi.ListSnapshotsResponse {
 	}
 
 	return rsp
+}
+
+func getFileShareInfo(id string) (string, string, string, error) {
+	segments := strings.Split(id, SEPERATOR)
+	if len(segments) < 3 {
+		return "", "", "", fmt.Errorf("error parsing volume id: %q", id)
+	}
+	return segments[0], segments[1], segments[2], nil
+}
+
+func getStorageAccesskey(cloud *azure.Cloud, account, resourceGroup string) (string, error) {
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
+
+	result, err := cloud.StorageAccountClient.ListKeys(ctx, resourceGroup, account)
+	if err != nil {
+		return "", err
+	}
+	if result.Keys == nil {
+		return "", fmt.Errorf("empty keys")
+	}
+
+	for _, k := range *result.Keys {
+		if k.Value != nil && *k.Value != "" {
+			v := *k.Value
+			if ind := strings.LastIndex(v, " "); ind >= 0 {
+				v = v[(ind + 1):]
+			}
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("no valid keys")
+}
+
+func getContextWithCancel() (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
 }
