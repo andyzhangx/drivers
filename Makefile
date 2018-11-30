@@ -13,40 +13,25 @@
 # limitations under the License.
 
 REGISTRY_NAME=quay.io/k8scsi
-IMAGE_NAME=hostpathplugin
+IMAGE_NAME=azurefileplugin
 IMAGE_VERSION=canary
 IMAGE_TAG=$(REGISTRY_NAME)/$(IMAGE_NAME):$(IMAGE_VERSION)
 REV=$(shell git describe --long --tags --dirty)
 
-.PHONY: all flexadapter nfs hostpath iscsi cinder clean hostpath-container
+.PHONY: all azurefile clean azurefile-container
 
-all: flexadapter nfs hostpath iscsi cinder
+all: azurefile
 
 test:
 	go test github.com/kubernetes-csi/drivers/pkg/... -cover
 	go vet github.com/kubernetes-csi/drivers/pkg/...
-flexadapter:
-	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static"' -o _output/flexadapter ./app/flexadapter
-nfs:
-	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static"' -o _output/nfsplugin ./app/nfsplugin
-hostpath:
-	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-X github.com/kubernetes-csi/drivers/pkg/hostpath.vendorVersion=$(REV) -extldflags "-static"' -o _output/hostpathplugin ./app/hostpathplugin
 azurefile:
 	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
 	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-X github.com/kubernetes-csi/drivers/pkg/azurefile.vendorVersion=$(REV) -extldflags "-static"' -o _output/azurefileplugin ./app/azurefileplugin
-hostpath-container: hostpath
-	docker build -t $(IMAGE_TAG) -f ./app/hostpathplugin/Dockerfile .
-push: hostpath-container
+azurefile-container: azurefile
+	docker build -t $(IMAGE_TAG) -f ./app/azurefileplugin/Dockerfile .
+push: azurefile-container
 	docker push $(IMAGE_TAG)
-iscsi:
-	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static"' -o _output/iscsiplugin ./app/iscsiplugin
-cinder:
-	if [ ! -d ./vendor ]; then dep ensure -vendor-only; fi
-	CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static"' -o _output/cinderplugin ./app/cinderplugin
 clean:
 	go clean -r -x
 	-rm -rf _output
