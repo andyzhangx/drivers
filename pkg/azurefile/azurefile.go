@@ -38,7 +38,15 @@ const (
 
 	ACCOUNT_NAME = "accountname"
 	ACCOUNT_KEY  = "accountkey"
-	SEPERATOR = "/"
+	SEPERATOR    = "#"
+
+	fileMode        = "file_mode"
+	dirMode         = "dir_mode"
+	gid             = "gid"
+	vers            = "vers"
+	defaultFileMode = "0777"
+	defaultDirMode  = "0777"
+	defaultVers     = "3.0"
 )
 
 type azureFile struct {
@@ -99,9 +107,10 @@ func NewControllerServer(d *csicommon.CSIDriver, cloud *azure.Cloud) *controller
 	}
 }
 
-func NewNodeServer(d *csicommon.CSIDriver) *nodeServer {
+func NewNodeServer(d *csicommon.CSIDriver, cloud *azure.Cloud) *nodeServer {
 	return &nodeServer{
 		DefaultNodeServer: csicommon.NewDefaultNodeServer(d),
+		cloud:             cloud,
 	}
 }
 
@@ -129,7 +138,7 @@ func (f *azureFile) Run(driverName, nodeID, endpoint string) {
 
 	// Create GRPC servers
 	f.ids = NewIdentityServer(f.driver)
-	f.ns = NewNodeServer(f.driver)
+	f.ns = NewNodeServer(f.driver, cloud)
 	f.cs = NewControllerServer(f.driver, cloud)
 
 	s := csicommon.NewNonBlockingGRPCServer()
@@ -196,4 +205,43 @@ func getStorageAccesskey(cloud *azure.Cloud, account, resourceGroup string) (str
 
 func getContextWithCancel() (context.Context, context.CancelFunc) {
 	return context.WithCancel(context.Background())
+}
+
+// check whether mountOptions contain file_mode, dir_mode, vers, gid, if not, append default mode
+func appendDefaultMountOptions(mountOptions []string) []string {
+	fileModeFlag := false
+	dirModeFlag := false
+	versFlag := false
+
+	for _, mountOption := range mountOptions {
+		if strings.HasPrefix(mountOption, fileMode) {
+			fileModeFlag = true
+		}
+		if strings.HasPrefix(mountOption, dirMode) {
+			dirModeFlag = true
+		}
+		if strings.HasPrefix(mountOption, vers) {
+			versFlag = true
+		}
+	}
+
+	allMountOptions := mountOptions
+	if !fileModeFlag {
+		allMountOptions = append(allMountOptions, fmt.Sprintf("%s=%s", fileMode, defaultFileMode))
+	}
+
+	if !dirModeFlag {
+		allMountOptions = append(allMountOptions, fmt.Sprintf("%s=%s", dirMode, defaultDirMode))
+	}
+
+	if !versFlag {
+		allMountOptions = append(allMountOptions, fmt.Sprintf("%s=%s", vers, defaultVers))
+	}
+
+	/* todo: looks like fsGroup is not included in CSI
+	if !gidFlag && fsGroup != nil {
+		allMountOptions = append(allMountOptions, fmt.Sprintf("%s=%d", gid, *fsGroup))
+	}
+	*/
+	return allMountOptions
 }

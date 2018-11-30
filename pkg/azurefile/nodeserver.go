@@ -17,25 +17,31 @@ limitations under the License.
 package azurefile
 
 import (
+	"fmt"
+	"io/ioutil"
 	"os"
-
-	"github.com/golang/glog"
-	"golang.org/x/net/context"
+	"runtime"
 
 	"github.com/container-storage-interface/spec/lib/go/csi/v0"
+	"github.com/golang/glog"
+	"github.com/kubernetes-csi/drivers/pkg/csi-common"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/kubernetes/pkg/util/mount"
 
-	"github.com/kubernetes-csi/drivers/pkg/csi-common"
+	"golang.org/x/net/context"
+
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure"
+	"k8s.io/kubernetes/pkg/util/mount"
+	volutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
 type nodeServer struct {
 	*csicommon.DefaultNodeServer
+	cloud *azure.Cloud
 }
 
 func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-
 	// Check arguments
 	if req.GetVolumeCapability() == nil {
 		return nil, status.Error(codes.InvalidArgument, "Volume capability missing in request")
@@ -49,19 +55,23 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	targetPath := req.GetTargetPath()
 	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if err = os.MkdirAll(targetPath, 0750); err != nil {
-				return nil, status.Error(codes.Internal, err.Error())
-			}
-			notMnt = true
-		} else {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
 	}
-
+	mounter := mount.New("")
 	if !notMnt {
-		return &csi.NodePublishVolumeResponse{}, nil
+		// testing original mount point, make sure the mount link is valid
+		if _, err := ioutil.ReadDir(targetPath); err == nil {
+			glog.V(2).Infof("azureFile - already mounted to target %s", targetPath)
+			return &csi.NodePublishVolumeResponse{}, nil
+		}
+		// todo: mount link is invalid, now unmount and remount later (built-in functionality)
+		glog.Warningf("azureFile - ReadDir %s failed with %v, unmount this directory", targetPath, err)
+		if err := mounter.Unmount(targetPath); err != nil {
+			glog.Errorf("azureFile - Unmount directory %s failed with %v", targetPath, err)
+			return nil, err
+		}
+		notMnt = true
 	}
 
 	fsType := req.GetVolumeCapability().GetMount().GetFsType()
@@ -72,20 +82,71 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	}
 
 	readOnly := req.GetReadonly()
-	volumeId := req.GetVolumeId()
+	volumeID := req.GetVolumeId()
 	attrib := req.GetVolumeAttributes()
 	mountFlags := req.GetVolumeCapability().GetMount().GetMountFlags()
 
 	glog.V(4).Infof("target %v\nfstype %v\ndevice %v\nreadonly %v\nvolumeId %v\nattributes %v\nmountflags %v\n",
-		targetPath, fsType, deviceId, readOnly, volumeId, attrib, mountFlags)
+		targetPath, fsType, deviceId, readOnly, volumeID, attrib, mountFlags)
 
-	options := []string{"bind"}
-	if readOnly {
-		options = append(options, "ro")
+	resourceGroupName, accountName, fileShareName, err := getFileShareInfo(volumeID)
+	if err != nil {
+		return nil, err
 	}
-	mounter := mount.New("")
-	path := provisionRoot + volumeId
-	if err := mounter.Mount(path, targetPath, "", options); err != nil {
+
+	if resourceGroupName == "" {
+		resourceGroupName = ns.cloud.ResourceGroup
+	}
+
+	accountKey, err := getStorageAccesskey(ns.cloud, accountName, resourceGroupName)
+	if err != nil {
+		return nil, fmt.Errorf("no key for storage account(%s) under resource group(%s), err %v", accountName, resourceGroupName, err)
+	}
+
+	mountOptions := []string{}
+	source := ""
+	osSeparator := string(os.PathSeparator)
+	source = fmt.Sprintf("%s%s%s.file.%s%s%s", osSeparator, osSeparator, accountName, ns.cloud.Environment.StorageEndpointSuffix, osSeparator, fileShareName)
+
+	if runtime.GOOS == "windows" {
+		mountOptions = []string{fmt.Sprintf("AZURE\\%s", accountName), accountKey}
+	} else {
+		if err := os.MkdirAll(targetPath, 0700); err != nil {
+			return nil, err
+		}
+		// parameters suggested by https://azure.microsoft.com/en-us/documentation/articles/storage-how-to-use-files-linux/
+		options := []string{fmt.Sprintf("username=%s,password=%s", accountName, accountKey)}
+		if readOnly {
+			options = append(options, "ro")
+		}
+		mountOptions = volutil.JoinMountOptions(mountFlags, options)
+		mountOptions = appendDefaultMountOptions(mountOptions)
+	}
+
+	err = mounter.Mount(source, targetPath, "cifs", mountOptions)
+	if err != nil {
+		notMnt, mntErr := mounter.IsLikelyNotMountPoint(targetPath)
+		if mntErr != nil {
+			glog.Errorf("IsLikelyNotMountPoint check failed: %v", mntErr)
+			return nil, err
+		}
+		if !notMnt {
+			if mntErr = mounter.Unmount(targetPath); mntErr != nil {
+				glog.Errorf("Failed to unmount: %v", mntErr)
+				return nil, err
+			}
+			notMnt, mntErr := mounter.IsLikelyNotMountPoint(targetPath)
+			if mntErr != nil {
+				glog.Errorf("IsLikelyNotMountPoint check failed: %v", mntErr)
+				return nil, err
+			}
+			if !notMnt {
+				// This is very odd, we don't expect it.  We'll try again next sync loop.
+				glog.Errorf("%s is still mounted, despite call to unmount().  Will try again next sync loop.", targetPath)
+				return nil, err
+			}
+		}
+		os.Remove(targetPath)
 		return nil, err
 	}
 
@@ -93,7 +154,6 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 }
 
 func (ns *nodeServer) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-
 	// Check arguments
 	if len(req.GetVolumeId()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
