@@ -17,7 +17,6 @@ limitations under the License.
 package azurefile
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -29,17 +28,8 @@ import (
 )
 
 const (
-	kib    int64 = 1024
-	mib    int64 = kib * 1024
-	gib    int64 = mib * 1024
-	gib100 int64 = gib * 100
-	tib    int64 = gib * 1024
-	tib100 int64 = tib * 100
-
-	ACCOUNT_NAME = "accountname"
-	ACCOUNT_KEY  = "accountkey"
-	SEPERATOR    = "#"
-
+	accountName     = "accountname"
+	seperator       = "#"
 	fileMode        = "file_mode"
 	dirMode         = "dir_mode"
 	gid             = "gid"
@@ -172,39 +162,11 @@ func getSnapshotByName(name string) (azureFileSnapshot, error) {
 }
 
 func getFileShareInfo(id string) (string, string, string, error) {
-	segments := strings.Split(id, SEPERATOR)
+	segments := strings.Split(id, seperator)
 	if len(segments) < 3 {
 		return "", "", "", fmt.Errorf("error parsing volume id: %q", id)
 	}
 	return segments[0], segments[1], segments[2], nil
-}
-
-func getStorageAccesskey(cloud *azure.Cloud, account, resourceGroup string) (string, error) {
-	ctx, cancel := getContextWithCancel()
-	defer cancel()
-
-	result, err := cloud.StorageAccountClient.ListKeys(ctx, resourceGroup, account)
-	if err != nil {
-		return "", err
-	}
-	if result.Keys == nil {
-		return "", fmt.Errorf("empty keys")
-	}
-
-	for _, k := range *result.Keys {
-		if k.Value != nil && *k.Value != "" {
-			v := *k.Value
-			if ind := strings.LastIndex(v, " "); ind >= 0 {
-				v = v[(ind + 1):]
-			}
-			return v, nil
-		}
-	}
-	return "", fmt.Errorf("no valid keys")
-}
-
-func getContextWithCancel() (context.Context, context.CancelFunc) {
-	return context.WithCancel(context.Background())
 }
 
 // check whether mountOptions contain file_mode, dir_mode, vers, gid, if not, append default mode

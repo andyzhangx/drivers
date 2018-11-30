@@ -109,10 +109,9 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 		glog.Errorf("failed to create volume: %v", err)
 		return nil, err
 	}
-	parameters[ACCOUNT_NAME] = account
-	//parameters[ACCOUNT_KEY] = key
+	parameters[accountName] = account
 
-	volumeID := resourceGroup + SEPERATOR + account + SEPERATOR + fileShareName
+	volumeID := resourceGroup + seperator + account + seperator + fileShareName
 
 	if req.GetVolumeContentSource() != nil {
 		contentSource := req.GetVolumeContentSource()
@@ -167,7 +166,7 @@ func (cs *controllerServer) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		resourceGroupName = cs.cloud.ResourceGroup
 	}
 
-	accountKey, err := getStorageAccesskey(cs.cloud, accountName, resourceGroupName)
+	accountKey, err := GetStorageAccesskey(cs.cloud, accountName, resourceGroupName)
 	if err != nil {
 		return nil, fmt.Errorf("no key for storage account(%s) under resource group(%s), err %v", accountName, resourceGroupName, err)
 	}

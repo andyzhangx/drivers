@@ -17,14 +17,17 @@ limitations under the License.
 package azurefile
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure"
 
 	"github.com/golang/glog"
 )
 
+// GetCloudProvider get Azure Cloud Provider
 func GetCloudProvider() (*azure.Cloud, error) {
 	credFile, ok := os.LookupEnv("AZURE_CREDENTIAL_FILE")
 	if ok {
@@ -50,4 +53,33 @@ func GetCloudProvider() (*azure.Cloud, error) {
 		return nil, fmt.Errorf("failed to get Azure Cloud Provider. GetCloudProvider returned %v instead", cloud)
 	}
 	return az, nil
+}
+
+// GetStorageAccesskey get storage account access key
+func GetStorageAccesskey(cloud *azure.Cloud, account, resourceGroup string) (string, error) {
+	ctx, cancel := getContextWithCancel()
+	defer cancel()
+
+	result, err := cloud.StorageAccountClient.ListKeys(ctx, resourceGroup, account)
+	if err != nil {
+		return "", err
+	}
+	if result.Keys == nil {
+		return "", fmt.Errorf("empty keys")
+	}
+
+	for _, k := range *result.Keys {
+		if k.Value != nil && *k.Value != "" {
+			v := *k.Value
+			if ind := strings.LastIndex(v, " "); ind >= 0 {
+				v = v[(ind + 1):]
+			}
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("no valid keys")
+}
+
+func getContextWithCancel() (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.Background())
 }

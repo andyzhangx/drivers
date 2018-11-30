@@ -98,7 +98,7 @@ func (ns *nodeServer) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		resourceGroupName = ns.cloud.ResourceGroup
 	}
 
-	accountKey, err := getStorageAccesskey(ns.cloud, accountName, resourceGroupName)
+	accountKey, err := GetStorageAccesskey(ns.cloud, accountName, resourceGroupName)
 	if err != nil {
 		return nil, fmt.Errorf("no key for storage account(%s) under resource group(%s), err %v", accountName, resourceGroupName, err)
 	}
