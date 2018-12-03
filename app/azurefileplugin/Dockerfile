@@ -1,6 +1,6 @@
 FROM alpine
-LABEL maintainers="Kubernetes Authors"
-LABEL description="AzureFile Driver"
+LABEL maintainers="andyzhangx"
+LABEL description="AzureFile CSI Driver"
 
 COPY ./_output/azurefileplugin /azurefileplugin
 ENTRYPOINT ["/azurefileplugin"]
