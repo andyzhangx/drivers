@@ -18,7 +18,7 @@ IMAGE_VERSION=canary
 IMAGE_TAG=$(REGISTRY_NAME)/$(IMAGE_NAME):$(IMAGE_VERSION)
 REV=$(shell git describe --long --tags --dirty)
 
-.PHONY: all azurefile clean azurefile-container
+.PHONY: all azurefile azurefile-container clean
 
 all: azurefile
 
